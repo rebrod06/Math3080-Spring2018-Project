@@ -1,0 +1,36 @@
+---
+title: "Math Project"
+author: "Rebecca Rodriguez"
+date: "April 2, 2018"
+output: html_document
+---
+
+
+## Step 1: Perform paired t-test tests for all monthly means
+- start at t = 2 (i.e. Year 0, Month 2)
+- calc f stat for each test
+
+## Step 2: Take max of all F-stats
+
+## Step 3: Create lambda distribution
+1) Monte Carlo simulation
+- sample size n=1000
+- simulate 1000 times
+- for each simulation, grab max 
+- with vector of 1000 maxes, use quantile function to calc critical-values
+
+## Step 4: Compare test stats to critical values
+- when test stat > critical val at sig level, reject H0 (i.e. calc p-val)
+- rejection point --> change point
+
+
+
+
+
+```{r tidy=TRUE}
+
+
+
+
+```
+
