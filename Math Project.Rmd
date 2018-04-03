@@ -1,6 +1,6 @@
 ---
 title: "Math Project"
-author: "Rebecca Rodriguez"
+author: "Rebecca Rodriguez, Erik Daenitz, Nick Hickman, Seoyeon Yang"
 date: "April 2, 2018"
 output: html_document
 ---
@@ -11,6 +11,7 @@ output: html_document
 - calc f stat for each test
 
 ## Step 2: Take max of all F-stats
+
 
 ## Step 3: Create lambda distribution
 1) Monte Carlo simulation
