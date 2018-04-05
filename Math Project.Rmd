@@ -6,12 +6,42 @@ output: html_document
 ---
 
 
-## Step 1: Perform paired t-test tests for all monthly means
+## Step 1: Perform two-sample t-tests for all monthly means
 - start at t = 2 (i.e. Year 0, Month 2)
-- calc f stat for each test
+- calc test stat for each test
 
-## Step 2: Take max of all F-stats
+```{r tidy=TRUE}
+#Step 1
 
+#import data
+treasury = read.csv("10YTreasuryYield.csv")
+
+#two-sample t test on mu_i and mu_j
+#H0: mu_i  = mu_j
+#HA: mu_i != mu_j
+
+#list to hold test statistics from t-tests
+all_test_stats = c()
+
+#perform test on increasing i and decreasing j for all t=2,...,1766 obsrevations
+index_end = length(treasury$Value)
+for (i in 2:(index_end-2)){
+  ttest_results = t.test(c(treasury$Value[1:i]), c(treasury$Value[i+1:index_end]), alternative="two.sided", var.equal=FALSE)
+  all_test_stats = c(all_test_stats, ttest_results$statistic) #put test statistic in list)
+}
+
+```
+
+## Step 2: Take min and max of all test statistics
+
+```{r tidy=TRUE}
+#step 2
+
+#grab min and max of all test statistics
+max_test_stat = max(all_test_stats)
+min_test_stat = min(all_test_stats)
+
+```
 
 ## Step 3: Create lambda distribution
 1) Monte Carlo simulation
