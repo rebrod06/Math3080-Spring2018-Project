@@ -1,7 +1,7 @@
 # Math-3080-Project-2018-
 Math 3080 Project
 
-4 Change Point Detection : It's the economy, stupid
+Change Point Detection : It's the economy, stupid
 
 A time series is a sequence of data points indexed by time: X1,X2,...,XT . Suppose the
 data in your time series follows a normal distribution, but, at some time k, the underlying
