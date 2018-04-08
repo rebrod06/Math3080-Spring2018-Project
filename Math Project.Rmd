@@ -46,7 +46,7 @@ s = 1 # The true variance of our normal distribution
 
 ## A Monte Carlo Simulation Function to generate our Lambda Distribution ##
 lambdaSim = function(sims,n,mu,s) {
-  l = replicate(sims,(max(rnorm(n,mu,s))))
+  l = abs(c(replicate(sims,(max(rnorm(n,mu,s)))),replicate(sims,(min(rnorm(n,mu,s))))))
   return(l)
 }
 
