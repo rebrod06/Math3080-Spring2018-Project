@@ -45,16 +45,26 @@ mu = 0 # The true expected mean value of our normal distribution
 s = 1 # The true variance of our normal distribution
 
 ## A Monte Carlo Simulation Function to generate our Lambda Distribution ##
-lambdaSim = function(sims,n,mu,s) {
+lambdaSimA = function(sims,n,mu,s) {
   l = abs(c(replicate(sims,(max(rnorm(n,mu,s)))),replicate(sims,(min(rnorm(n,mu,s))))))
+  return(l)
+}
+
+## A Monte Carlo Simulation Function to generate our Lambda Distribution ##
+lambdaSimB = function(sims,n,mu,s) {
+  l = replicate(sims,(max(abs(rnorm(n,mu,s)))))
   return(l)
 }
 
 ## Run the function to generate the Lambda Distribution ##
 lambdaDist = lambdaSim(sims,n,mu,s)
 
+lambdaDistB = lambdaSimB(sims,n,mu,s)
+
 ## Generate CDF of our Lambda Distribution later use to generate p-values at various critical values
 lambdaCDF = ecdf(lambdaDist)
+
+lambdaCDFb = ecdf(lambdaDistB)
 
 # Create LambdaPVal function to create P-values from our underlyinf Lambda Distribution
 lambdaPVal = function (x){
@@ -62,13 +72,18 @@ lambdaPVal = function (x){
 } 
 
 ## Return appropriate critical values of our Lambda Distribution to later test our F-Statistic against  
-lambdaQTS = quantile(lambdaDist, probs = c(0.90, 0.95, 0.975, 0.99, 0.999), na.rm = FALSE, names = FALSE, type = 1)
+lambdaQTSa = quantile(lambdaDist, probs = c(0.90, 0.95, 0.975, 0.99, 0.999), na.rm = FALSE, names = FALSE, type = 1)
+
+lambdaQTSb = quantile(lambdaDistB, probs = c(0.90, 0.95, 0.975, 0.99, 0.999), na.rm = FALSE, names = FALSE, type = 1)
 
 ## Visualization of our friendly Lambda PDF and CDF
 par(mfrow=c(2,2))
 hist(lambdaDist)
 plot(density(lambdaDist))
 plot(lambdaCDF)
+
+plot(density(lambdaDistB))
+plot(lambdaCDFb)
 
 ```
 
