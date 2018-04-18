@@ -57,7 +57,7 @@ lambdaSimB = function(sims,n,mu,s) {
 }
 
 ## Run the function to generate the Lambda Distribution ##
-lambdaDist = lambdaSim(sims,n,mu,s)
+lambdaDistA = lambdaSimA(sims,n,mu,s)
 
 lambdaDistB = lambdaSimB(sims,n,mu,s)
 
@@ -119,20 +119,56 @@ plot(lambdaCDF2)
 
 ```
 
-
-
 ## Step 4: Compare test stats to critical values
-- when test stat > critical val at sig level, reject H0 (i.e. calc p-val)
-- rejection point --> change point
-
-
-
-
+Function that recursively searches for changepoint
+parameters:
+rate_list: vector of float values
+alpha: significance level for two-sample t-test is set at the 0.05 level
+indexer: number of changepoints (default = 0)
 
 ```{r tidy=TRUE}
-
-
-
+changepoint_search = function(rate_list, indexer){
+  #initialize indexer
+  if(indexer == 0) {
+        indexer = indexer + 2
+  }
+  #if list isn't long enough, can't perform test
+  if (length(rate_list) < 4){
+    return ("Can't perform analysis")
+  }
+  #otherwise, perform the test
+  else{ 
+    #perform t test: is mean of first n items different from mean of remaining m items?
+    ttest_results = t.test(c(rate_list[1:(indexer)]), c(rate_list[(indexer+1):length(rate_list)]), alternative="two.sided", var.equal=FALSE)
+    t_stat = ttest_results$statistic
+    
+    #get critical val
+    c_val = lambdaQTSb[3] # TODO
+    #compare test stat to critical val
+    if (abs(t_stat) > c_val){ 
+      return (cat("value:", rate_list[indexer], "index", indexer))
+    }
+    #otherwise, no change found
+    else{
+      #if there aren't enough values left, stop searching
+      if(length(rate_list[(indexer+1):length(rate_list)]) < 2){
+        return ("Done comparing: no changepoint detected")
+      }
+      #otherwise, keep searching
+      else{
+        cat("indexer:", indexer) #print debugging
+        #move down the list
+        indexer = indexer + 1
+        return (changepoint_search(rate_list, alpha, indexer))
+      }
+    } 
+  }
+}
 
 ```
 
+```{r tidy=TRUE}
+
+changepoint_search(treasury10Y$SVENPY10[c(0:length(treasury10Y$SVENPY10))],0)
+
+```
