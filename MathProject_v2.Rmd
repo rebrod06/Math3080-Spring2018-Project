@@ -6,41 +6,120 @@ output: html_document
 ---
 
 
-## Step 1: Perform paired t-test tests for all monthly means
-- start at t = 2 (i.e. Year 0, Month 2)
-- calc f stat for each test
-
-## Step 2: Take max of all F-stats
-
-
-## Step 3: Data prep
+## Step 1: Data prep
 Get that shit
 
 ```{r, tidy = TRUE}
 ## Stream data into dataframe
-treasuryRates = read.csv("./FED-SVENPY.csv")
+#treasuryRates = read.csv("./FED-SVENPY.csv") #daily rates
+treasuryRates = read.csv("10YTreasuryYield.csv") #monthly rates
 
 ## Subset dataframe to only include 10 year rates
-treasury10Y = subset(treasuryRates, select=c(Date,SVENPY10))
-treasury10Y = treasury10Y[complete.cases(treasury10Y), ]
+#treasury10Y = subset(treasuryRates, select=c(Date,Value))
+#treasury10Y = treasury10Y[complete.cases(treasury10Y), ]
+rates = treasuryRates[1:245,]
 
 # Plot for fun
-plot(treasury10Y)
+#plot(treasury10Y)
+plot(rates$Value, type="l")
 
 ```
 
-## Step 3a: Create Lambda Distribution from Monte Carlo methods
-1) Monte Carlo simulation
-- sample size n=1000
-- simulate 1000 times
-- for each simulation, grab max 
-- with vector of 1000 maxes, use quantile function to calc critical-values
+## Step 2: Use Monte Carlo Method to simulate rates
+
+1) Generate X random standard normal variables (X = number of rates over 10 yr period)
+2) Repeat 1) 100 times to obtain 245x100 matrix
+3) Perform t-test on matrix columns
+  a) Perform X-4 t-tests and obtain X-4 test statistics
+  b) Grab the max test-statistic for each column to obtain 100 max values
 
 ```{r, tidy = TRUE}
 set.seed(1000) # set seed to ensure replicable results
 
-n = 10000 # The number of standard normal datasets to be tested
-sims = 50000 # The number of simulations to replicate, also the length of discrete values in our Lambda Distribution
+#parameters for sampling from standard normal distribution
+n = length(rates$Value) # The sample size
+sims = 100 # The number of simulations to replicate, also the length of discrete values in our Lambda Distribution
+mu = 0 # The true expected mean value of our normal distribution
+s = 1 # The true variance of our normal distribution
+
+#generate random samples of size n
+rs = matrix(rnorm(n*sims,mu,s), nrow=n, ncol=sims)
+
+#function to perform t tests
+#values: vector of float values
+t_tests = function(values){
+  index_end = length(values)
+  #vectors to hold test statistics
+  ttest_stats = c()
+  #traverse through list and perform t tests
+  for (i in 2:(index_end-2)){
+    #perform t test
+    ttest_results = t.test(c(values[1:i]), c(values[i+1:index_end]), alternative="two.sided", var.equal=TRUE)
+    #add test statistic to list
+    ttest_stats = c(ttest_stats, ttest_results$statistic)
+  }
+  #return max (absolute value) test statistic
+  return(max(abs(ttest_stats)))
+}
+
+
+#function to perform anova tests
+#rs:vector of float values
+anova_tests <- function(rs){
+  index_end = length(rs)
+  #vectors to hold test statistics
+  anovatest_stats = c()
+  #traverse through list and perform anova tests
+  for (i in 2:(index_end-2)){
+    #create factors for anova test
+    populations = factor(c(rep(c("a","b"), c(i,index_end-i))))
+    #perform anova test
+    anova_results = unlist(summary(aov(rs~populations)))
+    #put test statistic in list
+    anovatest_stats = c(anovatest_stats, anova_results[7])
+  }
+  #return max test statistic
+  return(max(anovatest_stats))
+}
+
+#retrieve max test statistics from applying functions to matrix
+max_stats_ttest = apply(rs, 2, t_tests)
+max_stats_anova = apply(rs, 2, anova_tests)
+
+```
+
+
+##Step 3: Create lambda distributions from max values
+
+Not sure this is correct
+
+```{r, tidy = TRUE}
+#distribution using max values from t-tests
+lambdaCDF_ttest = ecdf(max_stats_ttest)
+plot(density(max_stats_ttest))
+plot(lambdaCDF_ttest)
+
+#distribution using max values from anova tests
+lambdaCDF_anova = ecdf(max_stats_anova)
+plot(density(max_stats_anova))
+plot(lambdaCDF_anova)
+
+```
+
+
+## Step 3a: Create Lambda Distribution from Monte Carlo methods
+1) Monte Carlo simulation
+- sample size n = length of rates (245)
+- simulate 1000 times
+- for each simulation, grab max 
+- with vector of 1000 maxes, use quantile function to calc critical-values
+
+
+```{r, tidy = TRUE}
+set.seed(1000) # set seed to ensure replicable results
+
+n = 1000 # The sample size
+sims = 5000 # The number of simulations to replicate, also the length of discrete values in our Lambda Distribution
 mu = 0 # The true expected mean value of our normal distribution
 s = 1 # The true variance of our normal distribution
 
@@ -56,18 +135,13 @@ lambdaSimB = function(sims,n,mu,s) {
   return(l)
 }
 
-lambdaSimC = function(sims,n,mu,s) {
-  l = replicate(sims,(max((rnorm(n,mu,s),0))))
-  return(l)
-}
-
 ## Run the function to generate the Lambda Distribution ##
 lambdaDistA = lambdaSimA(sims,n,mu,s)
 
 lambdaDistB = lambdaSimB(sims,n,mu,s)
 
 ## Generate CDF of our Lambda Distribution later use to generate p-values at various critical values
-lambdaCDF = ecdf(lambdaDistA)
+lambdaCDF = ecdf(lambdaDist)
 
 lambdaCDFb = ecdf(lambdaDistB)
 
@@ -83,8 +157,8 @@ lambdaQTSb = quantile(lambdaDistB, probs = c(0.90, 0.95, 0.975, 0.99, 0.999), na
 
 ## Visualization of our friendly Lambda PDF and CDF
 par(mfrow=c(2,2))
-hist(lambdaDistA)
-plot(density(lambdaDistA))
+hist(lambdaDist)
+plot(density(lambdaDist))
 plot(lambdaCDF)
 
 plot(density(lambdaDistB))
@@ -102,19 +176,11 @@ lambdaResample = function(sims,x) {
   return(l)
 }
 
-lambdaResample2 = function(sims,x) {
-  l = replicate(sims,(replicate(sims,(max(sample(x, size=252, replace=FALSE))))))
-  return(l)
-}
-
 ## Run the function to generate the Lambda Distribution ##
-lambdaDistC = lambdaResample(sims,treasury10Y$SVENPY10)
-
-lambdaDistD = lambdaResample2(2000,treasury10Y$SVENPY10)
+lambdaDist2 = lambdaResample(sims,treasury10Y$SVENPY10)
 
 ## Generate CDF of our Lambda Distribution later use to generate p-values at various critical values
 lambdaCDF2 = ecdf(lambdaDist2)
-lambdaCDFD = ecdf(lambdaDistD)
 
 # Create LambdaPVal function to create P-values from our underlyinf Lambda Distribution
 lambdaPVal2 = function (x){
@@ -123,15 +189,12 @@ lambdaPVal2 = function (x){
 
 ## Return appropriate critical values of our Lambda Distribution to later test our F-Statistic against  
 lambdaQTS2 = quantile(lambdaDist2, probs = c(0.90, 0.95, 0.975, 0.99, 0.999), na.rm = FALSE, names = FALSE, type = 1)
-lambdaQTS3 = quantile(lambdaDistD, probs = c(0.90, 0.95, 0.975, 0.99, 0.999), na.rm = FALSE, names = FALSE, type = 1)
 
 ## Visualization of our friendly Lambda PDF and CDF
 par(mfrow=c(2,2))
 hist(lambdaDist2)
 plot(density(lambdaDist2))
 plot(lambdaCDF2)
-plot(density(lambdaDistD))
-plot(lambdaCDFD)
 
 ```
 
@@ -180,60 +243,5 @@ changepoint_search = function(rate_list, indexer){
     } 
   }
 }
-
-```
-
-```{r tidy=TRUE}
-
-changepoint_search(treasury10Y$SVENPY10[c(0:length(treasury10Y$SVENPY10))],0)
-
-sapply(treasury10Y$SVENPY10:treasury10Y$SVENPY10, function(x,y) changepoint_search(treasury10Y$SVENPY10,0))
-
-lapply(1:nrow(treasury10Y), function(rate_list,indexer) t.test(c(rate_list[1:(indexer)]), c(rate_list[(indexer+1):length(rate_list)]), alternative="two.sided", var.equal=FALSE))
-
-lapply(1:10, changepoint_search(rnorm(100,0,1),0))
-
-change2 = function(x) {
-  for (i in seq_len(nrow(x))) {
-  ttest_results = t.test(x[c(1,i+1),], x[c(i+2,i+length(x)),], alternative="two.sided", var.equal=FALSE)
-  t_stat = ttest_results$statistic
-  return(t_stat)
-  }
-}
-
-x = as.data.frame(rnorm(100,0,1))
-
-change2(x)
-
-replicate(100, change2(x))
-
-```
-
-
-```{r tidy=TRUE}
-
-changepoint_dist_search = function(rate_list, indexer){
-  for(row in 1:nrow(rate_list)){
-    #initialize indexer
-    if(indexer == 0) {
-          indexer = indexer + 2
-    }
-    #if list isn't long enough, can't perform test
-    if (length(rate_list) < 4){
-      return ("Can't perform analysis")
-    }
-    #otherwise, perform the test
-    else{ 
-      #perform t test: is mean of first n items different from mean of remaining m items?
-      ttest_results = t.test(c(rate_list[1:(indexer)]), c(rate_list[(indexer+1):length(rate_list)]), alternative="two.sided", var.equal=FALSE)
-      t_stat = ttest_results$statistic
-      indexer = indexer + 1
-      return(t_stat)
-    }
-  }
-}
-
-changepoint_dist_search(treasury10Y$SVENPY10,0)
-
 
 ```
