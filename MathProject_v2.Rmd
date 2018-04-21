@@ -11,13 +11,16 @@ Get that shit
 
 ```{r, tidy = TRUE}
 ## Stream data into dataframe
-#treasuryRates = read.csv("./FED-SVENPY.csv") #daily rates
-treasuryRates = read.csv("10YTreasuryYield.csv") #monthly rates
+treasuryRates = read.csv("./FED-SVENPY.csv") #daily rates
+#treasuryRates = read.csv("./10YTreasuryYield.csv") #monthly rates
 
 ## Subset dataframe to only include 10 year rates
-#treasury10Y = subset(treasuryRates, select=c(Date,Value))
-#treasury10Y = treasury10Y[complete.cases(treasury10Y), ]
-rates = treasuryRates[1:245,]
+treasury10Y = subset(treasuryRates, select=c(Date,SVENPY10))
+colnames(treasury10Y)[c(1,2)] = c("Date", "Value")
+treasury10Y = treasury10Y[complete.cases(treasury10Y), ]
+treasury10Y = treasury10Y[(order(as.Date(treasury10Y$Date))),]
+treasury10Y = na.omit(treasury10Y)
+rates = treasury10Y[10120:11620,]
 
 # Plot for fun
 #plot(treasury10Y)
@@ -38,7 +41,7 @@ set.seed(1000) # set seed to ensure replicable results
 
 #parameters for sampling from standard normal distribution
 n = length(rates$Value) # The sample size
-sims = 100 # The number of simulations to replicate, also the length of discrete values in our Lambda Distribution
+sims = 1000 # The number of simulations to replicate, also the length of discrete values in our Lambda Distribution
 mu = 0 # The true expected mean value of our normal distribution
 s = 1 # The true variance of our normal distribution
 
@@ -62,10 +65,9 @@ t_tests = function(values){
   return(max(abs(ttest_stats)))
 }
 
-
-#function to perform anova tests
+#function to perform anova tests returning max value
 #rs:vector of float values
-anova_tests <- function(rs){
+anova_tests = function(rs){
   index_end = length(rs)
   #vectors to hold test statistics
   anovatest_stats = c()
@@ -82,9 +84,15 @@ anova_tests <- function(rs){
   return(max(anovatest_stats))
 }
 
+library(snow)
+cl = makeSOCKcluster(c("localhost","localhost","localhost","localhost"))
+
 #retrieve max test statistics from applying functions to matrix
 max_stats_ttest = apply(rs, 2, t_tests)
 max_stats_anova = apply(rs, 2, anova_tests)
+
+max_stats_ttest2 = parApply(cl, rs, 2, t_tests)
+max_stats_anova2 = parApply(cl, rs, 2, anova_tests)
 
 ```
 
@@ -95,14 +103,19 @@ Not sure this is correct
 
 ```{r, tidy = TRUE}
 #distribution using max values from t-tests
-lambdaCDF_ttest = ecdf(max_stats_ttest)
-plot(density(max_stats_ttest))
+lambdaCDF_ttest = ecdf(max_stats_ttest2)
+plot(density(max_stats_ttest2))
 plot(lambdaCDF_ttest)
 
 #distribution using max values from anova tests
-lambdaCDF_anova = ecdf(max_stats_anova)
-plot(density(max_stats_anova))
+lambdaCDF_anova = ecdf(max_stats_anova2)
+plot(density(max_stats_anova2))
 plot(lambdaCDF_anova)
+
+# Create LambdaPVal function to create P-values from our underlyinf Lambda Distribution
+lambdaPVal = function (x){
+  return(1-lambdaCDF(x))
+} 
 
 ```
 
@@ -119,7 +132,7 @@ plot(lambdaCDF_anova)
 set.seed(1000) # set seed to ensure replicable results
 
 n = 1000 # The sample size
-sims = 5000 # The number of simulations to replicate, also the length of discrete values in our Lambda Distribution
+sims = 1000 # The number of simulations to replicate, also the length of discrete values in our Lambda Distribution
 mu = 0 # The true expected mean value of our normal distribution
 s = 1 # The true variance of our normal distribution
 
@@ -154,6 +167,10 @@ lambdaPVal = function (x){
 lambdaQTSa = quantile(lambdaDist, probs = c(0.90, 0.95, 0.975, 0.99, 0.999), na.rm = FALSE, names = FALSE, type = 1)
 
 lambdaQTSb = quantile(lambdaDistB, probs = c(0.90, 0.95, 0.975, 0.99, 0.999), na.rm = FALSE, names = FALSE, type = 1)
+
+lambdaQTSc = quantile(max_stats_ttest2, probs = c(0.90, 0.95, 0.975, 0.99, 0.999), na.rm = FALSE, names = FALSE, type = 1)
+
+lambdaQTSd = quantile(max_stats_anova2, probs = c(0.90, 0.95, 0.975, 0.99, 0.999), na.rm = FALSE, names = FALSE, type = 1)
 
 ## Visualization of our friendly Lambda PDF and CDF
 par(mfrow=c(2,2))
@@ -206,7 +223,7 @@ alpha: significance level for two-sample t-test is set at the 0.05 level
 indexer: number of changepoints (default = 0)
 
 ```{r tidy=TRUE}
-changepoint_search = function(rate_list, indexer){
+changepoint_search_ttest = function(rate_list, indexer){
   #initialize indexer
   if(indexer == 0) {
         indexer = indexer + 2
@@ -222,7 +239,7 @@ changepoint_search = function(rate_list, indexer){
     t_stat = ttest_results$statistic
     
     #get critical val
-    c_val = lambdaQTS3[3] # TODO
+    c_val = lambdaQTSc[4] # TODO
     #compare test stat to critical val
     if (abs(t_stat) > c_val){ 
       return (cat("value:", rate_list[indexer], "index", indexer))
@@ -243,5 +260,87 @@ changepoint_search = function(rate_list, indexer){
     } 
   }
 }
+
+
+#function to perform anova tests returning test statistic on the real data
+#rs:vector of float values
+anova_F = function(rs){
+  index_end = length(rs)
+  #vectors to hold test statistics
+  anovatest_stats = c()
+  #traverse through list and perform anova tests
+  for (i in 2:(index_end-2)){
+    #create factors for anova test
+    populations = factor(c(rep(c("a","b"), c(i,index_end-i))))
+    #perform anova test
+    anova_results = unlist(summary(aov(rs~populations))) ### Add in critical value comparisons at alpha levels
+    #put test statistic in list
+    anovatest_stats = c(anovatest_stats, anova_results[9],anova_results[7])
+  }
+  #return max test statistic
+  return(anovatest_stats)
+}
+
+
+changepoint_search_anova = function(rate_list, indexer){
+  #initialize indexer
+  if(indexer == 0) {
+        indexer = indexer + 2
+  }
+  #if list isn't long enough, can't perform test
+  if (length(rate_list) < 4){
+    return ("Can't perform analysis")
+  }
+  #otherwise, perform the test
+  else{ 
+    #perform anova test: is mean of first n items different from mean of remaining m items?
+    populations = factor(c(rep(c("a","b"), c(length(rate_list[1:(indexer)]),length(rate_list[(indexer+1):length(rate_list)])))))
+    aov_results = unlist(summary(aov(rs~populations)))
+    f_stat = aov_results[7]
+    
+    #get critical val
+    c_val = lambdaQTSd[4] # TODO
+    #compare test stat to critical val
+    if (abs(f_stat) > c_val){ 
+      return (cat("value:", rate_list[indexer], "index", indexer))
+    }
+    #otherwise, no change found
+    else{
+      #if there aren't enough values left, stop searching
+      if(length(rate_list[(indexer+1):length(rate_list)]) < 2){
+        return ("Done comparing: no changepoint detected")
+      }
+      #otherwise, keep searching
+      else{
+        #cat("indexer:", indexer) #print debugging
+        #move down the list
+        indexer = indexer + 1
+        return (changepoint_search(rate_list, indexer))
+      }
+    } 
+  }
+}
+
+
+changepoint_search_anova(rates$Value,0)
+
+a_result = anova_F(rates$Value)
+result_index = which.max(a_result)
+print(rates[result_index,])
+sub1 = subset(rates[0:result_index,])
+sub2 = subset(rates[result_index+1:length(rates),])
+
+a_result1 = anova_F(sub1$Value)
+result_index = which.max(a_result1)
+print(rates[result_index,])
+
+a_result2 = anova_F(sub2$Value)
+result_index = which.max(a_result2)
+print(rates[result_index,])
+
+
+c(rates$Value[1:(2)])
+c(rates$Value[(2+1):length(rates$Value)])
+rep(c("a","b"), c(length(rates$Value[1:(2)]),length(rates$Value[(3):length(rates$Value)])))
 
 ```
