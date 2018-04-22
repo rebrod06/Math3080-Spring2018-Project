@@ -10,20 +10,21 @@ output: html_document
 Get that shit
 
 ```{r, tidy = TRUE}
+
 ## Stream data into dataframe
 treasuryRates = read.csv("./FED-SVENPY.csv") #daily rates
-#treasuryRates = read.csv("./10YTreasuryYield.csv") #monthly rates
 
 ## Subset dataframe to only include 10 year rates
 treasury10Y = subset(treasuryRates, select=c(Date,SVENPY10))
-colnames(treasury10Y)[c(1,2)] = c("Date", "Value")
-treasury10Y = treasury10Y[complete.cases(treasury10Y), ]
+colnames(treasury10Y)[c(1,2)] = c("Date", "Value") # rename columns
+treasury10Y = treasury10Y[complete.cases(treasury10Y), ] # drop NAs
 treasury10Y = treasury10Y[(order(as.Date(treasury10Y$Date))),]
-treasury10Y = na.omit(treasury10Y)
-rates = treasury10Y[((252*20)+1):length(treasury10Y),] # take 20 past years of treasury data
+row.names(treasury10Y) = NULL  # re-index the new subset
+rates = treasury10Y[((nrow(treasury10Y))-((252*30)+1)):(nrow(treasury10Y)),] # take ~30 past years of treasury data, data takes a year to = 252 days per year and 30 years of past data from the latest observed value
+rownames(rates) = NULL # re-index the new subset
 
-# Plot for fun
-plot(rates$Value, type="l")
+# Plot time series for fun visualization
+plot(rates$Value ~ as.Date(rates$Date), type="l", main = "U.S. Treasury 10 Year - Yield (%)", xlab = "Date" ,ylab = "Yield (%)")
 
 ```
 

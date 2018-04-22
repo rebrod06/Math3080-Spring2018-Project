@@ -1,71 +1,60 @@
 ---
 title: "Math Project"
 author: "Rebecca Rodriguez, Erik Daenitz, Nick Hickman, Seoyeon Yang"
-date: "April 2, 2018"
+date: "April 22, 2018"
 output: html_document
 ---
 
 
 ## Step 1: Data prep
-Get that shit
+Stream U.S. 10 yeare Treasury data into data frame. We use daily end-of-day observations for yields. We then subset that data to take the most recent ~20 years of daily observations.
 
 ```{r, tidy = TRUE}
 ## Stream data into dataframe
 treasuryRates = read.csv("./FED-SVENPY.csv") #daily rates
-#treasuryRates = read.csv("./10YTreasuryYield.csv") #monthly rates
 
 ## Subset dataframe to only include 10 year rates
 treasury10Y = subset(treasuryRates, select=c(Date,SVENPY10))
-colnames(treasury10Y)[c(1,2)] = c("Date", "Value")
-treasury10Y = treasury10Y[complete.cases(treasury10Y), ]
+colnames(treasury10Y)[c(1,2)] = c("Date", "Value") # rename columns
+treasury10Y = treasury10Y[complete.cases(treasury10Y), ] # drop NAs
 treasury10Y = treasury10Y[(order(as.Date(treasury10Y$Date))),]
-treasury10Y = na.omit(treasury10Y)
-rates = treasury10Y[((252*20)+1):length(treasury10Y),] # take 20 past years of treasury data
+row.names(treasury10Y) = NULL  # re-index the new subset
+rates = treasury10Y[((nrow(treasury10Y))-((252*30)+1)):(nrow(treasury10Y)),] # take ~30 past years of treasury data, data takes a year to = 252 days per year and 30 years of past data from the latest observed value
+rownames(rates) = NULL # re-index the new subset
 
-# Plot for fun
-plot(rates$Value, type="l")
+# Plot time series for fun visualization
+plot(rates$Value ~ as.Date(rates$Date), type="l", main = "U.S. Treasury 10 Year - Yield (%)", xlab = "Date" ,ylab = "Yield (%)")
 
 ```
 
 ## Step 2: Use Monte Carlo Method to simulate rates
 
-1) Generate X random standard normal variables (X = number of rates over 10 yr period)
-2) Repeat 1) 100 times to obtain 245x100 matrix
-3) Perform t-test on matrix columns
-  a) Perform X-4 t-tests and obtain X-4 test statistics
-  b) Grab the max test-statistic for each column to obtain 100 max values
+1) Generate X random standard normal variables (X = number of observations over 20 yr period)
+2) Repeat 1) 1000 times to obtain 5040x1000 matrix
+3) Perform cascading One Way ANOVA test within each matrix column
+  a) Perform X-4 tests and obtain X-4 test statistics
+  b) Grab the max test-statistic for each column to obtain 1000 max values to form our Lambda Distribution with
 
 ```{r, tidy = TRUE}
-set.seed(1000) # set seed to ensure replicable results
+set.seed(1000) # Set seed to ensure replicable results
 
-#parameters for sampling from standard normal distribution
+# Parameters for sampling from standard normal distribution
 n = length(rates$Value) # The sample size
 sims = 1000 # The number of simulations to replicate, also the length of discrete values in our Lambda Distribution
 mu = 0 # The true expected mean value of our normal distribution
 s = 1 # The true variance of our normal distribution
 
-#generate random samples of size n
-rs = matrix(rnorm(n*sims,mu,s), nrow=n, ncol=sims)
-
-#function to perform t tests
-#values: vector of float values
-t_tests = function(values){
-  index_end = length(values)
-  #vectors to hold test statistics
-  ttest_stats = c()
-  #traverse through list and perform t tests
-  for (i in 2:(index_end-2)){
-    #perform t test
-    ttest_results = t.test(c(values[1:i]), c(values[i+1:index_end]), alternative="two.sided", var.equal=TRUE)
-    #add test statistic to list
-    ttest_stats = c(ttest_stats, ttest_results$statistic)
-  }
-  #return max (absolute value) test statistic
-  return(max(abs(ttest_stats)))
+## A Resampling Simulation Function to generate our Lambda Distribution ##
+lambdaResample = function(n,x) {
+  l = replicate(x,(sample(n, size=1, replace=FALSE)))
+  return(l)
 }
 
-#function to perform anova tests returning max value
-#rs:vector of float values
+# Generate random samples of size n
+rs = matrix(lambdaResample(rates$Value,sims), nrow=n, ncol=sims)
+
+# Function to perform cascading ANOVA tests through each vector and return max F value
+# rs: vector of float values
 anova_tests = function(rs){
   index_end = length(rs)
   #vectors to hold test statistics
@@ -83,101 +72,40 @@ anova_tests = function(rs){
   return(max(anovatest_stats))
 }
 
+## Now run the function over every vector in the matrix ##
+
+# Load the library "snow"" to parallelize the computation using all available cores of the local machine
 library(snow)
+# Open up sockets to the 4 local processor cores
+## Note: only enter "localhost" = to the number of cores on your processor
 cl = makeSOCKcluster(c("localhost","localhost","localhost","localhost"))
 
-#retrieve max test statistics from applying functions to matrix
-max_stats_ttest = apply(rs, 2, t_tests)
-max_stats_anova = apply(rs, 2, anova_tests)
-
-max_stats_ttest2 = parApply(cl, rs, 2, t_tests)
+# Retrieve max test statistics by applying the function to each matrix vector
+## Note: expect to wait about 45 mins on a 2.7ghz quad core processor ##
 max_stats_anova2 = parApply(cl, rs, 2, anova_tests)
-
 ```
 
 
-##Step 3: Create lambda distributions from max values
+##Step 3: Create Lambda distribution CDF, PDF and critical values from simulated Lamda Distribution
+Now that we have achieved the simulation of the Lamda Distribution we must assemble a CDF and take quantiles of the PDF at different alpha critical value levels.
+
+Our chosen alpha levels:
+$$\alpha=0.10, 0.05, 0.025, 0.01, 0.001$$
 
 ```{r, tidy = TRUE}
-#distribution using max values from t-tests
-lambdaCDF_ttest = ecdf(max_stats_ttest2)
-plot(density(max_stats_ttest2))
-plot(lambdaCDF_ttest)
-
-#distribution using max values from anova tests
+# CDF and plotted PDF using max values Lamda Distribution from ANOVA tests
 lambdaCDF_anova = ecdf(max_stats_anova2)
-plot(density(max_stats_anova2))
-plot(lambdaCDF_anova)
+plot(density(max_stats_anova2), main = "Lambda PDF", xlab = "Critical Value" , ylab = "Density of Observations")
+plot(lambdaCDF_anova, main = "Lambda CDF", xlab = "Critical Value" , ylab = "Accumulated Area")
 
-# Create LambdaPVal function to create P-values from our underlyinf Lambda Distribution
+# Spare P-value function to create P-values from our underlying Lambda Distribution at any specified critical value
+## Note: This function is not used in subsequent code, it is just created to provide quick intuition on associated p-values with any critical value if the user wishes to get a better sense of the distribution areas.
 lambdaPVal = function (x){
   return(1-lambdaCDF(x))
 } 
 
-```
-
-
-## Step 3a: Create Lambda Distribution from Monte Carlo methods
-1) Monte Carlo simulation
-- sample size n = length of rates (245)
-- simulate 1000 times
-- for each simulation, grab max 
-- with vector of 1000 maxes, use quantile function to calc critical-values
-
-
-```{r, tidy = TRUE}
-set.seed(1000) # set seed to ensure replicable results
-
-n = 1000 # The sample size
-sims = 1000 # The number of simulations to replicate, also the length of discrete values in our Lambda Distribution
-mu = 0 # The true expected mean value of our normal distribution
-s = 1 # The true variance of our normal distribution
-
-## A Monte Carlo Simulation Function to generate our Lambda Distribution ##
-lambdaSimA = function(sims,n,mu,s) {
-  l = abs(c(replicate(sims,(max(rnorm(n,mu,s)))),replicate(sims,(min(rnorm(n,mu,s))))))
-  return(l)
-}
-
-## A Monte Carlo Simulation Function to generate our Lambda Distribution ##
-lambdaSimB = function(sims,n,mu,s) {
-  l = replicate(sims,(max(abs(rnorm(n,mu,s)))))
-  return(l)
-}
-
-## Run the function to generate the Lambda Distribution ##
-lambdaDistA = lambdaSimA(sims,n,mu,s)
-
-lambdaDistB = lambdaSimB(sims,n,mu,s)
-
-## Generate CDF of our Lambda Distribution later use to generate p-values at various critical values
-lambdaCDF = ecdf(lambdaDist)
-
-lambdaCDFb = ecdf(lambdaDistB)
-
-# Create LambdaPVal function to create P-values from our underlyinf Lambda Distribution
-lambdaPVal = function (x){
-  return(1-lambdaCDF(x))
-} 
-
-## Return appropriate critical values of our Lambda Distribution to later test our F-Statistic against  
-lambdaQTSa = quantile(lambdaDist, probs = c(0.90, 0.95, 0.975, 0.99, 0.999), na.rm = FALSE, names = FALSE, type = 1)
-
-lambdaQTSb = quantile(lambdaDistB, probs = c(0.90, 0.95, 0.975, 0.99, 0.999), na.rm = FALSE, names = FALSE, type = 1)
-
-lambdaQTSc = quantile(max_stats_ttest2, probs = c(0.90, 0.95, 0.975, 0.99, 0.999), na.rm = FALSE, names = FALSE, type = 1)
-
+# Return appropriate critical values of our Lambda Distribution to later test our F-Statistics on live data against 
 lambdaQTSd = quantile(max_stats_anova2, probs = c(0.90, 0.95, 0.975, 0.99, 0.999), na.rm = FALSE, names = FALSE, type = 1)
-
-## Visualization of our friendly Lambda PDF and CDF
-par(mfrow=c(2,2))
-hist(lambdaDist)
-plot(density(lambdaDist))
-plot(lambdaCDF)
-
-plot(density(lambdaDistB))
-plot(lambdaCDFb)
-
 ```
 
 ## Step 3b: Create Lambda Distribution from resampling underlying Treasury data
@@ -298,7 +226,7 @@ changepoint_search_anova = function(rate_list, indexer){
     #get critical val
     c_val = lambdaQTSd[4] # TODO
     #compare test stat to critical val
-    if (abs(f_stat) > c_val){ 
+    if (f_stat > c_val){ 
       return (cat("value:", rate_list[indexer], "index", indexer))
     }
     #otherwise, no change found
@@ -309,7 +237,6 @@ changepoint_search_anova = function(rate_list, indexer){
       }
       #otherwise, keep searching
       else{
-        #cat("indexer:", indexer) #print debugging
         #move down the list
         indexer = indexer + 1
         return (changepoint_search(rate_list, indexer))
@@ -332,7 +259,7 @@ anova_F2 = function(rs){
     #get critical val
     c_val = lambdaQTSd[4] # TODO
     #compare test stat to critical val
-    if (abs(f_stat) > c_val){ 
+    if (f_stat > c_val){ 
       anovatest_stats = c(anovatest_stats, "Changepoint", anova_results[7], anova_results[9])
     }
     #otherwise, no change found
@@ -348,12 +275,13 @@ anova_F2 = function(rs){
 a_result = changepoint_search_anova(rates$Value,0)
 rates[3,]
 
-sub1 = rates[1:3,]
-sub2 = rates[4:5040,]
+sub1 = rates[1:32,]
+sub2 = rates[33:5040,]
 
-changepoint_search_anova(sub1$Value,0)
-changepoint_search_anova(sub2$Value,0)
+#changepoint_search_anova(sub1$Value,0)
+#changepoint_search_anova(sub2$Value,0)
 
+#######################
 
 a2_Results = as.data.frame(anova_F2(rates$Value))
 anova_results = data.frame(
@@ -370,6 +298,38 @@ plot(rates$Value, type="l")
 plot(anova_results$FVal, type="l")
 plot(anova_results$PVal, type = "l")
 
+###########################
+
+
+a2_Results_sub1 = as.data.frame(anova_F2(sub1$Value))
+anova_results_sub1 = data.frame(
+  x = a2_Results_sub1,
+  result = c("Result", "FVal", "PVal")[c(1,2,3)]
+)
+
+anova_results_sub1 = unstack(anova_results_sub1)
+max(anova_results_sub1$FVal)
+which.max(anova_results_sub1$FVal)
+
+par(mfrow=c(2,2))
+plot(rates$Value, type="l")
+plot(anova_results_sub2$FVal, type="l")
+plot(anova_results_sub2$PVal, type = "l")
+
+a2_Results_sub2 = as.data.frame(anova_F2(sub2$Value))
+anova_results_sub2 = data.frame(
+  x = a2_Results_sub2,
+  result = c("Result", "FVal", "PVal")[c(1,2,3)]
+)
+
+anova_results_sub2 = unstack(anova_results_sub2)
+max(anova_results_sub2$FVal)
+which.max(anova_results_sub2$FVal)
+
+par(mfrow=c(2,2))
+plot(sub2$Value, type="l")
+plot(anova_results_sub2$FVal, type="l")
+plot(anova_results_sub2$PVal, type = "l")
 
 ## Data for plot
 aov_chart = rates[-3,]
