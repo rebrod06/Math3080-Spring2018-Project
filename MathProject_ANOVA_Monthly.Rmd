@@ -1,5 +1,5 @@
 ---
-title: "Math Project"
+title: "It's the Economy Stupid: A Time Series Analysis of 10 Year Montlhy Treasury Rates with ANOVA"
 author: "Rebecca Rodriguez, Erik Daenitz, Nick Hickman, Seoyeon Yang"
 date: "April 22, 2018"
 output: html_document
@@ -11,19 +11,19 @@ Stream U.S. 10 yeare Treasury data into data frame. We use daily end-of-day obse
 
 ```{r, tidy = TRUE}
 ## Stream data into dataframe
-treasuryRates = read.csv("./FED-SVENPY.csv") #daily rates
+treasuryRates_m = read.csv("./10YTreasuryYield.csv") # Monthly 10Y Treasury rates
 
 ## Subset dataframe to only include 10 year rates
-treasury10Y = subset(treasuryRates, select=c(Date,SVENPY10))
-colnames(treasury10Y)[c(1,2)] = c("Date", "Value") # rename columns
-treasury10Y = treasury10Y[complete.cases(treasury10Y), ] # drop NAs
-treasury10Y = treasury10Y[(order(as.Date(treasury10Y$Date))),]
-row.names(treasury10Y) = NULL  # re-index the new subset
-rates = treasury10Y[((nrow(treasury10Y))-((252*30)+1)):(nrow(treasury10Y)),] # take ~30 past years of treasury data, data takes a year to = 252 days per year and 30 years of past data from the latest observed value
-rownames(rates) = NULL # re-index the new subset
+treasury10Y_m = subset(treasuryRates, select=c(Date,Value))
+colnames(treasury10Y_m)[c(1,2)] = c("Date", "Value") # rename columns
+treasury10Y_m = treasury10Y[complete.cases(treasury10Y_m), ] # drop NAs
+treasury10Y_m = treasury10Y[(order(as.Date(treasury10Y_m$Date))),]
+row.names(treasury10Y_m) = NULL  # re-index the new subset
+rates_m = treasury10Y_m[((nrow(treasury10Y_m))-((252*30)+1)):(nrow(treasury10Y_m)),] # take ~30 past years of treasury data, data takes a year to = 252 days per year and 30 years of past data from the latest observed value
+rownames(rates_m) = NULL # re-index the new subset
 
 # Plot time series for fun visualization
-plot(rates$Value ~ as.Date(rates$Date), type="l", main = "U.S. Treasury 10 Year - Yield (%)", xlab = "Date" ,ylab = "Yield (%)")
+plot(rates_m$Value ~ as.Date(rates_m$Date), type="l", main = "U.S. Treasury 10 Year - Yield (%)", xlab = "Date" ,ylab = "Yield (%)")
 
 ```
 
@@ -39,13 +39,13 @@ plot(rates$Value ~ as.Date(rates$Date), type="l", main = "U.S. Treasury 10 Year 
 set.seed(1000) # Set seed to ensure replicable results
 
 # Parameters for sampling from standard normal distribution
-n = length(rates$Value) # The sample size
+n_m = length(rates_m$Value) # The sample size
 sims = 1000 # The number of simulations to replicate, also the length of discrete values in our Lambda Distribution
 mu = 0 # The true expected mean value of our normal distribution
 s = 1 # The true variance of our normal distribution
 
 # Generate random samples of size n
-rs = matrix(rnorm(n*sims,mu,s), nrow=n, ncol=sims)
+rs_m = matrix(rnorm(n_m*sims,mu,s), nrow=n, ncol=sims)
 
 # Function to perform cascading ANOVA tests through each vector and return max F value
 # rs: vector of float values
@@ -76,7 +76,7 @@ cl = makeSOCKcluster(c("localhost","localhost","localhost","localhost"))
 
 # Retrieve max test statistics by applying the function to each matrix vector
 ## Note: expect to wait about 45 mins on a 2.7ghz quad core processor ##
-max_stats_anova2 = parApply(cl, rs, 2, anova_tests)
+max_stats_anova2_m = parApply(cl, rs_m, 2, anova_tests)
 ```
 
 
@@ -88,9 +88,9 @@ $$\alpha=0.10, 0.05, 0.025, 0.01, 0.001$$
 
 ```{r, tidy = TRUE}
 # CDF and plotted PDF using max values Lamda Distribution from ANOVA tests
-lambdaCDF_anova = ecdf(max_stats_anova2)
-plot(density(max_stats_anova2), main = "Lambda PDF", xlab = "Critical Value" , ylab = "Density of Observations")
-plot(lambdaCDF_anova, main = "Lambda CDF", xlab = "Critical Value" , ylab = "Accumulated Area")
+lambdaCDF_anova_m = ecdf(max_stats_anova2_m)
+plot(density(max_stats_anova2_m), main = "Lambda PDF", xlab = "Critical Value" , ylab = "Density of Observations")
+plot(lambdaCDF_anova_m, main = "Lambda CDF", xlab = "Critical Value" , ylab = "Accumulated Area")
 
 # Spare P-value function to create P-values from our underlying Lambda Distribution at any specified critical value
 ## Note: This function is not used in subsequent code, it is just created to provide quick intuition on associated p-values with any critical value if the user wishes to get a better sense of the distribution areas.
@@ -99,7 +99,7 @@ lambdaPVal = function (x){
 } 
 
 # Return appropriate critical values of our Lambda Distribution to later test our F-Statistics on live data against 
-lambdaQTSd = quantile(max_stats_anova2, probs = c(0.90, 0.95, 0.975, 0.99, 0.999), na.rm = FALSE, names = FALSE, type = 1)
+lambdaQTSd_m = quantile(max_stats_anova2, probs = c(0.90, 0.95, 0.975, 0.99, 0.999), na.rm = FALSE, names = FALSE, type = 1)
 ```
 
 ## Step 4: Compare test stats to critical values
@@ -138,20 +138,20 @@ anova_F = function(rs){
 
 #### Run the test on live data comparing to our Lambda Distribution critical value ###
 # We also contruct the steps below to kick out the F-value and P-value for each test run
-a_Results = as.data.frame(anova_F(rates$Value))
-anova_results = data.frame(
-  x = a_Results,
+a_Results_m = as.data.frame(anova_F(rates$Value))
+anova_results_m = data.frame(
+  x = a_Results_m,
   result = c("Result", "FVal", "PVal")[c(1,2,3)]
 )
 # Unstack into a dataframe to see each respective index, F-Value and P-Value
-anova_results = unstack(anova_results)
+anova_results_m = unstack(anova_results)
 
-max(anova_results$FVal)
+max(anova_results_m$FVal)
 
 par(mfrow=c(2,2))
-plot(rates$Value ~ as.Date(rates$Date), type="l", main = "U.S. Treasury 10 Year - Yield (%)", xlab = "Date" , ylab = "Yield (%)")
-plot(anova_results$FVal, type="l", main = "F-Values Across Cascading Test", xlab = "Index", ylab = "F-Values")
-plot(anova_results$PVal, type = "l", main = "P-Values Across Cascading Test", xlab = "Index", ylab = "P-Values")
+plot(rates_m$Value ~ as.Date(rates$Date), type="l", main = "U.S. Treasury 10 Year - Yield (%)", xlab = "Date" , ylab = "Yield (%)")
+plot(anova_results_m$FVal, type="l", main = "F-Values Across Cascading Test", xlab = "Index", ylab = "F-Values")
+plot(anova_results_m$PVal, type = "l", main = "P-Values Across Cascading Test", xlab = "Index", ylab = "P-Values")
 
 ###########################
 

@@ -1,5 +1,5 @@
 ---
-title: "Math Project"
+title: "It's the Economy Stupid: A Time Series Analysis of 10 Year Daily Treasury Rates with ANOVA"
 author: "Rebecca Rodriguez, Erik Daenitz, Nick Hickman, Seoyeon Yang"
 date: "April 22, 2018"
 output: html_document

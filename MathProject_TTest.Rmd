@@ -65,34 +65,11 @@ t_tests = function(values){
   return(max(abs(ttest_stats)))
 }
 
-#function to perform anova tests returning max value
-#rs:vector of float values
-anova_tests = function(rs){
-  index_end = length(rs)
-  #vectors to hold test statistics
-  anovatest_stats = c()
-  #traverse through list and perform anova tests
-  for (i in 2:(index_end-2)){
-    #create factors for anova test
-    populations = factor(c(rep(c("a","b"), c(i,index_end-i))))
-    #perform anova test
-    anova_results = unlist(summary(aov(rs~populations)))
-    #put test statistic in list
-    anovatest_stats = c(anovatest_stats, anova_results[7])
-  }
-  #return max test statistic
-  return(max(anovatest_stats))
-}
-
 library(snow)
 cl = makeSOCKcluster(c("localhost","localhost","localhost","localhost"))
 
 #retrieve max test statistics from applying functions to matrix
-max_stats_ttest = apply(rs, 2, t_tests)
-max_stats_anova = apply(rs, 2, anova_tests)
-
 max_stats_ttest2 = parApply(cl, rs, 2, t_tests)
-max_stats_anova2 = parApply(cl, rs, 2, anova_tests)
 
 ```
 
@@ -105,111 +82,12 @@ lambdaCDF_ttest = ecdf(max_stats_ttest2)
 plot(density(max_stats_ttest2))
 plot(lambdaCDF_ttest)
 
-#distribution using max values from anova tests
-lambdaCDF_anova = ecdf(max_stats_anova2)
-plot(density(max_stats_anova2))
-plot(lambdaCDF_anova)
-
 # Create LambdaPVal function to create P-values from our underlyinf Lambda Distribution
 lambdaPVal = function (x){
   return(1-lambdaCDF(x))
 } 
-
-```
-
-
-## Step 3a: Create Lambda Distribution from Monte Carlo methods
-1) Monte Carlo simulation
-- sample size n = length of rates (245)
-- simulate 1000 times
-- for each simulation, grab max 
-- with vector of 1000 maxes, use quantile function to calc critical-values
-
-
-```{r, tidy = TRUE}
-set.seed(1000) # set seed to ensure replicable results
-
-n = 1000 # The sample size
-sims = 1000 # The number of simulations to replicate, also the length of discrete values in our Lambda Distribution
-mu = 0 # The true expected mean value of our normal distribution
-s = 1 # The true variance of our normal distribution
-
-## A Monte Carlo Simulation Function to generate our Lambda Distribution ##
-lambdaSimA = function(sims,n,mu,s) {
-  l = abs(c(replicate(sims,(max(rnorm(n,mu,s)))),replicate(sims,(min(rnorm(n,mu,s))))))
-  return(l)
-}
-
-## A Monte Carlo Simulation Function to generate our Lambda Distribution ##
-lambdaSimB = function(sims,n,mu,s) {
-  l = replicate(sims,(max(abs(rnorm(n,mu,s)))))
-  return(l)
-}
-
-## Run the function to generate the Lambda Distribution ##
-lambdaDistA = lambdaSimA(sims,n,mu,s)
-
-lambdaDistB = lambdaSimB(sims,n,mu,s)
-
-## Generate CDF of our Lambda Distribution later use to generate p-values at various critical values
-lambdaCDF = ecdf(lambdaDist)
-
-lambdaCDFb = ecdf(lambdaDistB)
-
-# Create LambdaPVal function to create P-values from our underlyinf Lambda Distribution
-lambdaPVal = function (x){
-  return(1-lambdaCDF(x))
-} 
-
-## Return appropriate critical values of our Lambda Distribution to later test our F-Statistic against  
-lambdaQTSa = quantile(lambdaDist, probs = c(0.90, 0.95, 0.975, 0.99, 0.999), na.rm = FALSE, names = FALSE, type = 1)
-
-lambdaQTSb = quantile(lambdaDistB, probs = c(0.90, 0.95, 0.975, 0.99, 0.999), na.rm = FALSE, names = FALSE, type = 1)
 
 lambdaQTSc = quantile(max_stats_ttest2, probs = c(0.90, 0.95, 0.975, 0.99, 0.999), na.rm = FALSE, names = FALSE, type = 1)
-
-lambdaQTSd = quantile(max_stats_anova2, probs = c(0.90, 0.95, 0.975, 0.99, 0.999), na.rm = FALSE, names = FALSE, type = 1)
-
-## Visualization of our friendly Lambda PDF and CDF
-par(mfrow=c(2,2))
-hist(lambdaDist)
-plot(density(lambdaDist))
-plot(lambdaCDF)
-
-plot(density(lambdaDistB))
-plot(lambdaCDFb)
-
-```
-
-## Step 3b: Create Lambda Distribution from resampling underlying Treasury data
-
-```{r, tidy = TRUE}
-
-## A Resampling Simulation Function to generate our Lambda Distribution ##
-lambdaResample = function(sims,x) {
-  l = replicate(sims,(sample(x, size=1, replace=FALSE)))
-  return(l)
-}
-
-## Run the function to generate the Lambda Distribution ##
-lambdaDist2 = lambdaResample(sims,treasury10Y$SVENPY10)
-
-## Generate CDF of our Lambda Distribution later use to generate p-values at various critical values
-lambdaCDF2 = ecdf(lambdaDist2)
-
-# Create LambdaPVal function to create P-values from our underlyinf Lambda Distribution
-lambdaPVal2 = function (x){
-  return(1-lambdaCDF2(x))
-} 
-
-## Return appropriate critical values of our Lambda Distribution to later test our F-Statistic against  
-lambdaQTS2 = quantile(lambdaDist2, probs = c(0.90, 0.95, 0.975, 0.99, 0.999), na.rm = FALSE, names = FALSE, type = 1)
-
-## Visualization of our friendly Lambda PDF and CDF
-par(mfrow=c(2,2))
-hist(lambdaDist2)
-plot(density(lambdaDist2))
-plot(lambdaCDF2)
 
 ```
 
@@ -221,103 +99,9 @@ alpha: significance level for two-sample t-test is set at the 0.05 level
 indexer: number of changepoints (default = 0)
 
 ```{r tidy=TRUE}
-changepoint_search_ttest = function(rate_list, indexer){
-  #initialize indexer
-  if(indexer == 0) {
-        indexer = indexer + 2
-  }
-  #if list isn't long enough, can't perform test
-  if (length(rate_list) < 4){
-    return ("Can't perform analysis")
-  }
-  #otherwise, perform the test
-  else{ 
-    #perform t test: is mean of first n items different from mean of remaining m items?
-    ttest_results = t.test(c(rate_list[1:(indexer)]), c(rate_list[(indexer+1):length(rate_list)]), alternative="two.sided", var.equal=FALSE)
-    t_stat = ttest_results$statistic
-    
-    #get critical val
-    c_val = lambdaQTSc[4] # TODO
-    #compare test stat to critical val
-    if (abs(t_stat) > c_val){ 
-      return (cat("value:", rate_list[indexer], "index", indexer))
-    }
-    #otherwise, no change found
-    else{
-      #if there aren't enough values left, stop searching
-      if(length(rate_list[(indexer+1):length(rate_list)]) < 2){
-        return ("Done comparing: no changepoint detected")
-      }
-      #otherwise, keep searching
-      else{
-        #cat("indexer:", indexer) #print debugging
-        #move down the list
-        indexer = indexer + 1
-        return (changepoint_search(rate_list, indexer))
-      }
-    } 
-  }
-}
-
-
 #function to perform anova tests returning test statistic on the real data
-#rs:vector of float values
-anova_F = function(rs){
-  index_end = length(rs)
-  #vectors to hold test statistics
-  anovatest_stats = c()
-  #traverse through list and perform anova tests
-  for (i in 2:(index_end-2)){
-    #create factors for anova test
-    populations = factor(c(rep(c("a","b"), c(i,index_end-i))))
-    #perform anova test
-    anova_results = unlist(summary(aov(rs~populations))) ### Add in critical value comparisons at alpha levels
-    #put test statistic in list
-    anovatest_stats = c(anovatest_stats, anova_results[9],anova_results[7])
-  }
-  #return max test statistic
-  return(anovatest_stats)
-}
 
-
-changepoint_search_anova = function(rate_list, indexer){
-  #initialize indexer
-  if(indexer == 0) {
-        indexer = indexer + 2
-  }
-  #if list isn't long enough, can't perform test
-  if (length(rate_list) < 4){
-    return ("Can't perform analysis")
-  }
-  #otherwise, perform the test
-  else{ 
-    #perform anova test: is mean of first n items different from mean of remaining m items?
-    populations = factor(c(rep(c("a","b"), c(length(rate_list[1:(indexer)]),length(rate_list[(indexer+1):length(rate_list)])))))
-    aov_results = unlist(summary(aov(rs~populations)))
-    f_stat = aov_results[7]
-    
-    #get critical val
-    c_val = lambdaQTSd[4] # TODO
-    #compare test stat to critical val
-    if (abs(f_stat) > c_val){ 
-      return (cat("value:", rate_list[indexer], "index", indexer))
-    }
-    #otherwise, no change found
-    else{
-      #if there aren't enough values left, stop searching
-      if(length(rate_list[(indexer+1):length(rate_list)]) < 2){
-        return ("Done comparing: no changepoint detected")
-      }
-      #otherwise, keep searching
-      else{
-        #cat("indexer:", indexer) #print debugging
-        #move down the list
-        indexer = indexer + 1
-        return (changepoint_search(rate_list, indexer))
-      }
-    } 
-  }
-}
+#Redo as T-Test!
 
 anova_F2 = function(rs){
   index_end = length(rs)
@@ -395,18 +179,6 @@ chart = ggplot() +
   geom_line(data = aov_chart, aes(x = Date, y = PVal), color = "green") +
   xlab('Date')
 chart
-
-print(rates[90,])
-sub1 = subset(rates[0:result_index,])
-sub2 = subset(rates[result_index+1:length(rates),])
-
-a_result1 = anova_F(sub1$Value)
-result_index = which.max(a_result1)
-print(rates[result_index,])
-
-a_result2 = anova_F2(sub2$Value)
-result_index = which.max(a_result2)
-print(rates[result_index,])
 
 
 ```
