@@ -14,16 +14,16 @@ Stream U.S. 10 yeare Treasury data into data frame. We use daily end-of-day obse
 treasuryRates_m = read.csv("./10YTreasuryYield.csv") # Monthly 10Y Treasury rates
 
 ## Subset dataframe to only include 10 year rates
-treasury10Y_m = subset(treasuryRates, select=c(Date,Value))
+treasury10Y_m = treasuryRates_m
 colnames(treasury10Y_m)[c(1,2)] = c("Date", "Value") # rename columns
-treasury10Y_m = treasury10Y[complete.cases(treasury10Y_m), ] # drop NAs
-treasury10Y_m = treasury10Y[(order(as.Date(treasury10Y_m$Date))),]
-row.names(treasury10Y_m) = NULL  # re-index the new subset
-rates_m = treasury10Y_m[((nrow(treasury10Y_m))-((252*30)+1)):(nrow(treasury10Y_m)),] # take ~30 past years of treasury data, data takes a year to = 252 days per year and 30 years of past data from the latest observed value
+treasury10Y_m = treasury10Y_m[complete.cases(treasury10Y_m), ] # drop NAs
+#treasury10Y_m = treasury10Y_m[(order(as.Date(treasury10Y_m$Date))),]
+#row.names(treasury10Y_m) = NULL  # re-index the new subset
+rates_m = treasury10Y_m[689:1060,] # take ~30 past years of treasury data, data takes a year to = 252 days per year and 30 years of past data from the latest observed value
 rownames(rates_m) = NULL # re-index the new subset
 
 # Plot time series for fun visualization
-plot(rates_m$Value ~ as.Date(rates_m$Date), type="l", main = "U.S. Treasury 10 Year - Yield (%)", xlab = "Date" ,ylab = "Yield (%)")
+plot(rates_m$Value, type="l", main = "U.S. Treasury 10 Year - Yield (%)", xlab = "Date" ,ylab = "Yield (%)")
 
 ```
 
@@ -45,7 +45,7 @@ mu = 0 # The true expected mean value of our normal distribution
 s = 1 # The true variance of our normal distribution
 
 # Generate random samples of size n
-rs_m = matrix(rnorm(n_m*sims,mu,s), nrow=n, ncol=sims)
+rs_m = matrix(rnorm(n_m*sims,mu,s), nrow=n_m, ncol=sims)
 
 # Function to perform cascading ANOVA tests through each vector and return max F value
 # rs: vector of float values
@@ -75,7 +75,6 @@ library(snow)
 cl = makeSOCKcluster(c("localhost","localhost","localhost","localhost"))
 
 # Retrieve max test statistics by applying the function to each matrix vector
-## Note: expect to wait about 45 mins on a 2.7ghz quad core processor ##
 max_stats_anova2_m = parApply(cl, rs_m, 2, anova_tests)
 ```
 
@@ -93,24 +92,19 @@ plot(density(max_stats_anova2_m), main = "Lambda PDF", xlab = "Critical Value" ,
 plot(lambdaCDF_anova_m, main = "Lambda CDF", xlab = "Critical Value" , ylab = "Accumulated Area")
 
 # Spare P-value function to create P-values from our underlying Lambda Distribution at any specified critical value
-## Note: This function is not used in subsequent code, it is just created to provide quick intuition on associated p-values with any critical value if the user wishes to get a better sense of the distribution areas.
-lambdaPVal = function (x){
-  return(1-lambdaCDF(x))
+## Note: This function is used later in subsequent code, it is just created to provide quick intuition on associated p-values with any critical value if the user wishes to get a better sense of the distribution areas.
+lambdaPVal_m = function (x){
+  return(1-lambdaCDF_anova_m(x))
 } 
 
 # Return appropriate critical values of our Lambda Distribution to later test our F-Statistics on live data against 
-lambdaQTSd_m = quantile(max_stats_anova2, probs = c(0.90, 0.95, 0.975, 0.99, 0.999), na.rm = FALSE, names = FALSE, type = 1)
+lambdaQTSd_m = quantile(max_stats_anova2_m, probs = c(0.90, 0.95, 0.975, 0.99, 0.999), na.rm = FALSE, names = FALSE, type = 1)
 ```
 
-## Step 4: Compare test stats to critical values
-Function that recursively searches for changepoint parameters:
-rate_list: vector of float values
-alpha: significance level for our test is set at the $$\alpha= 0.001~level$$
-
-```{r tidy=TRUE}
-# Function to perform anova tests returning test statistic on the real data
-# rs:vector of float values
-anova_F = function(rs){
+##Step 4: Perform ANOVA tests on Treasury data
+```{r, tidy = TRUE}
+# Function to run on live data that collects max f-values and corresponding index
+anova_test_live = function(rs){
   index_end = length(rs)
   #vectors to hold test statistics
   anovatest_stats = c()
@@ -120,81 +114,117 @@ anova_F = function(rs){
     populations = factor(c(rep(c("a","b"), c(i,index_end-i))))
     #perform anova test
     anova_results = unlist(summary(aov(rs~populations)))
-    f_stat = anova_results[7]
-    #get critical val
-    c_val = lambdaQTSd[4] # Reference Lambda critical value at alpha = 0.01
-    #compare test stat to critical val
-    if (f_stat > c_val){ 
-      anovatest_stats = c(anovatest_stats, "Changepoint", anova_results[7], anova_results[9])
-    }
-    #otherwise, no change found
-    else{
-      anovatest_stats = c(anovatest_stats, "No Changepoint", anova_results[7], anova_results[9])
-      }
+    #put test statistic in list
+    anovatest_stats = c(anovatest_stats, anova_results[7])
   }
-  #return max test statistic
-  return(anovatest_stats)
+  
+  #return vector of max test statistic and corresponding index
+  max_stat = max(anovatest_stats)
+  return(c(max_stat, (match(max_stat, anovatest_stats)+1))) #index of last element in first population
 }
 
-#### Run the test on live data comparing to our Lambda Distribution critical value ###
-# We also contruct the steps below to kick out the F-value and P-value for each test run
-a_Results_m = as.data.frame(anova_F(rates$Value))
-anova_results_m = data.frame(
-  x = a_Results_m,
-  result = c("Result", "FVal", "PVal")[c(1,2,3)]
-)
-# Unstack into a dataframe to see each respective index, F-Value and P-Value
-anova_results_m = unstack(anova_results)
+#find biggest changepoint in data
+max1_m = anova_test_live(rates_m$Value)
 
-max(anova_results_m$FVal)
+#create two subsets from max1
+pop1a_m = rates_m$Value[(1:max1_m[2])]
+pop1b_m = rates_m$Value[(max1_m[2]+1):(length(rates_m$Value))]
 
-par(mfrow=c(2,2))
-plot(rates_m$Value ~ as.Date(rates$Date), type="l", main = "U.S. Treasury 10 Year - Yield (%)", xlab = "Date" , ylab = "Yield (%)")
-plot(anova_results_m$FVal, type="l", main = "F-Values Across Cascading Test", xlab = "Index", ylab = "F-Values")
-plot(anova_results_m$PVal, type = "l", main = "P-Values Across Cascading Test", xlab = "Index", ylab = "P-Values")
+#perform anova tests on each subset and grab max test statistics
+max2_m = anova_test_live(pop1a_m)
+max3_m = anova_test_live(pop1b_m)
 
-###########################
+#create two subsets from max2
+pop2a_m = pop1a[1:max2_m[2]]
+pop2b_m = pop1a[(max2_m[2]+1):length(pop1a_m)]
 
-## Subsetting code to come
+#create two subsets from max3
+pop3a_m = pop1b_m[1:max3_m[2]]
+pop3b_m = pop1b[(max3_m[2]+1):length(pop1b_m)]
 
-sub2 = rates[3:length(rates$Value),]
+#perform anova tests on each new subset and grab max test statisticss
+max4_m = anova_test_live(pop2a_m)
+max5_m = anova_test_live(pop2b_m)
+max6_m = anova_test_live(pop3a_m)
+max7_m = anova_test_live(pop3b_m)
 
-a2_Results_sub2 = as.data.frame(anova_F(sub2$Value))
-anova_results_sub2 = data.frame(
-  x = a2_Results_sub2,
-  result = c("Result", "FVal", "PVal")[c(1,2,3)]
-)
+# Retrieve index from original data
+# for example, grab index within original data for max5
+# which(rates_m$Value == pop3b[max7[2]])
 
-anova_results_sub2 = unstack(anova_results_sub2)
+### Our First Change Point ####
+firstChangePoint_m = rates_m[max1_m[2],]
+firstChangePValue_m = lambdaPVal_m(max1_m[1])
+print(firstChangePoint_m)
+print(firstChangePValue_m)
 
-plot(sub2$Value ~ as.Date(sub2$Date), type="l", main = "U.S. Treasury 10 Year - Yield (%)", xlab = "Date" , ylab = "Yield (%)")
-plot(anova_results_sub2$FVal, type="l", main = "F-Values Across Cascading Test", xlab = "Index", ylab = "F-Values")
-plot(anova_results_sub2$PVal, type = "l", main = "P-Values Across Cascading Test", xlab = "Index", ylab = "P-Values")
+changePointIndices_m = c(max1_m[2],(which(rates_m$Value == pop1a_m[max2_m[2]])),(which(rates_m$Value == pop1b_m[max3_m[2]])),(which(rates_m$Value == pop2a_m[max4_m[2]])),(which(rates_m$Value == pop2b_m[max5_m[2]])),(which(rates_m$Value == pop3a_m[max6_m[2]])),(which(rates_m$Value == pop3b_m[max7_m[2]])))
 
-## Data for plot
-aov_chart = rates[-3,]
-aov_chart = rates[1:(n-3),]
-aov_chart$Date = as.Date(aov_chart$Date)
-aov_chart$Value = as.numeric(aov_chart$Value)
-aov_chart$FVal = as.numeric(anova_results$FVal)
-aov_chart$PVal = as.numeric(anova_results$PVal)
-aov_chart$FVal = round(aov_chart$FVal, digits = 3)
-aov_chart$PVal = round(aov_chart$PVal, digits = 6)
-
+library(R.utils)
+rates_m$Changepoint_m = 0
+rates_m$Changepoint_m[changePointIndices_m[1]] = 1
+rates_m$Changepoint_m[changePointIndices_m[2]] = 1
+rates_m$Changepoint_m[changePointIndices_m[3]] = 1
+rates_m$Changepoint_m[changePointIndices_m[4]] = 1
+rates_m$Changepoint_m[changePointIndices_m[5]] = 1
 
 library(ggplot2)
-library(reshape2)
-aov_chart_prep = melt(aov_chart, id = "Date", measure = c("Value", "FVal", "PVal"))
-ggplot(aov_chart_prep, aes(Date, value, colour = variable)) + geom_line()
+library(grid)
+library(dplyr)
+library(lubridate)
 
+df_m = data.frame(DateTime = mdy("05-01-1987") + months(0:371), series1 = rates_m$Value, series2 = rates_m$Changepoint_m)
 
-chart = ggplot() + 
-  geom_line(data = aov_chart, aes(x = Date, y = Value), color = "red") + scale_y_continuous
-  geom_line(data = aov_chart, aes(x = Date, y = FVal), color = "blue") + scale_y_continuous(sec.axis = sec_axis(~./1000)) +
-  geom_line(data = aov_chart, aes(x = Date, y = PVal), color = "green") +
-  xlab('Date')
-chart
+#' Create the two plots.
+plot1 = df_m %>%
+  select(DateTime, series1) %>%
+  ggplot() +
+  geom_line(aes(x = DateTime, y = series1), size = 0.5, alpha = 0.75) +
+  ylab("10Y UST (Yield,%)") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank())
 
-### Running new data in to come
+plot2 = df_m %>%
+  select(DateTime, series2) %>%
+  ggplot() +
+  geom_line(aes(x = DateTime, y = series2), size = 0.5, alpha = 0.75) +
+  ylab("Changepoint Signal") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank())
+
+grid.newpage()
+grid.draw(rbind(ggplotGrob(plot1), ggplotGrob(plot2), size = "last"))
+
+```
+
+##Step 5: Check Assumptions of ANOVA on our First Changepoint
+```{r, tidy = TRUE}
+
+i_m = max1_m[2] # The index of our first changepoint
+index_end_m = length(rates_m$Value)
+cp_pop_m = factor(c(rep(c("a","b"), c(i_m,index_end_m-i))))
+
+cp_aov_m = aov(rates_m$Value ~ cp_pop_m)
+ap_aov_res_m = resid(cp_aov_m)
+
+# Testing for normality of the Treasury sample residuals
+qqnorm(ap_aov_res_m) # a built-in function to generate qq-plots
+qqline(ap_aov_res_m) # add a straight line to the qq-plots
+
+shapiro.test(ap_aov_res_m) # Shapiro-Wilks test for normality
+
+##We see from the QQplot of residuals that the sample residuals appear non-normal.
+## The Shapiro-Wilks test, with a p-value that is small, affirms this interpretation.
+
+### Test for Homeskedasticity
+
+plot(ap_aov_res_m, ylab="Residuals", xlab="Fitted Value") 
+abline(0, 0)
+
+plot(cp_aov_m)
+
+## Our Residuals vs. Fitted values plot shows a relatively patterned distribution which indicates some dependency in our data
+## We conclude that the assumption of homoskedasticity appears implausible
+## Yet, the consruction of our procedures is robust and we can still conclude that our changepoint is valid
 
 ```

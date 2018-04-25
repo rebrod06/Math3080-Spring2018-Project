@@ -1,0 +1,254 @@
+---
+title: "Math Project"
+author: "Rebecca Rodriguez, Erik Daenitz, Nick Hickman, Seoyeon Yang"
+date: "April 22, 2018"
+output: html_document
+---
+
+
+## Step 1: Data prep
+Stream U.S. 10 year Treasury data into data frame. We use daily end-of-day observations for yields. We then subset that data to take the most recent ~20 years of daily observations.
+
+```{r, tidy = TRUE}
+## Stream data into dataframe
+treasuryRates = read.csv("./FED-SVENPY.csv") #daily rates
+
+## Subset dataframe to only include 10 year rates
+treasury10Y = subset(treasuryRates, select=c(Date,SVENPY10))
+colnames(treasury10Y)[c(1,2)] = c("Date", "Value") # rename columns
+treasury10Y = treasury10Y[complete.cases(treasury10Y), ] # drop NAs
+treasury10Y = treasury10Y[(order(as.Date(treasury10Y$Date))),]
+row.names(treasury10Y) = NULL  # re-index the new subset
+rates = treasury10Y[((nrow(treasury10Y))-((252*30)+1)):(nrow(treasury10Y)),] # take ~30 past years of treasury data, data takes a year to = 252 days per year and 30 years of past data from the latest observed value
+rownames(rates) = NULL # re-index the new subset
+
+# Plot time series for fun visualization
+plot(rates$Value ~ as.Date(rates$Date), type="l", main = "U.S. Treasury 10 Year - Yield (%)", xlab = "Date" ,ylab = "Yield (%)")
+
+```
+
+Import monthly rates for past 20 years
+
+```{r, tidy = TRUE}
+
+##using 10 year monthly rates
+
+#import monthly data
+treasuryRates = read.csv("10YTreasuryYield.csv") #monthly rates
+
+#grab past 20 years
+rates = treasuryRates[1:245,]
+```
+
+
+## Step 2: Use Monte Carlo Method to simulate rates
+
+1) Generate X random standard normal variables (X = number of observations over 20 yr period)
+2) Repeat 1) 1000 times to obtain 7562x1000 matrix
+3) Perform cascading One Way ANOVA test within each matrix column
+  a) Perform X-4 tests and obtain X-4 test statistics
+  b) Grab the max test-statistic for each column to obtain 1000 max values to form our Lambda Distribution with
+
+```{r, tidy = TRUE}
+set.seed(1000) # Set seed to ensure replicable results
+
+# Parameters for sampling from standard normal distribution
+n = length(rates$Value) # The sample size
+m = 1000 # The number of simulations to replicate, also the length of values in our Lambda Distribution
+mu = 0 # The true expected mean value of our normal distribution
+s = 1 # The true variance of our normal distribution
+
+# Generate m random samples of size n
+rs = matrix(rnorm(n*m,mu,s), nrow=n, ncol=m)
+
+# Function to perform cascading ANOVA tests through a vector and return max f statistic
+# rs: vector of float values
+anova_tests = function(rs){
+  index_end = length(rs)
+  #vectors to hold test statistics
+  anovatest_stats = c()
+  #traverse through list and perform anova tests
+  for (i in 2:(index_end-2)){
+    #create factors for anova test
+    populations = factor(c(rep(c("a","b"), c(i,index_end-i))))
+    #perform anova test
+    anova_results = unlist(summary(aov(rs~populations)))
+    #put test statistic in list
+    anovatest_stats = c(anovatest_stats, anova_results[7])
+  }
+  
+  #return vector of max test statistic and corresponding index
+  max_stat = max(anovatest_stats)
+  return(c(max_stat, (match(max_stat, anovatest_stats)+1))) #index of last element in first population
+}
+
+## Now run the function over every vector (column) in the matrix ##
+
+# Load the library "snow"" to parallelize the computation using all available cores of the local machine
+install.packages('CRAN', dependencies=TRUE, repos='http://cran.rstudio.com/')
+library(snow)
+# Open up sockets to the 4 local processor cores
+## Note: only enter "localhost" = to the number of cores on your processor
+cl = makeSOCKcluster(c("localhost","localhost","localhost","localhost"))
+
+# Retrieve max test statistics by applying the function to each matrix vector
+## Note: expect to wait about 45 mins on a 2.7ghz quad core processor ##
+max_stats_anova2 = parApply(cl, rs, 2, anova_tests)
+```
+
+
+##Step 3: Create Lambda distribution CDF, PDF and critical values from simulated Lamda Distribution
+Now that we have achieved the simulation of the Lamda Distribution we must assemble a CDF and take quantiles of the PDF at different alpha critical value levels.
+
+Our chosen alpha levels:
+$$\alpha=0.10, 0.05, 0.025, 0.01, 0.001$$
+
+```{r, tidy = TRUE}
+# CDF and plotted PDF using max values Lamda Distribution from ANOVA tests
+lambdaCDF_anova = ecdf(max_stats_anova2)
+plot(density(max_stats_anova2), main = "Lambda PDF", xlab = "Critical Value" , ylab = "Density of Observations")
+plot(lambdaCDF_anova, main = "Lambda CDF", xlab = "Critical Value" , ylab = "Accumulated Area")
+
+# Spare P-value function to create P-values from our underlying Lambda Distribution at any specified critical value
+## Note: This function is not used in subsequent code, it is just created to provide quick intuition on associated p-values with any critical value if the user wishes to get a better sense of the distribution areas.
+lambdaPVal = function (x){
+  return(1-lambdaCDF(x))
+} 
+
+# Return appropriate critical values of our Lambda Distribution to later test our F-Statistics on live data against 
+lambdaQTSd = quantile(max_stats_anova2, probs = c(0.90, 0.95, 0.975, 0.99, 0.999), na.rm = FALSE, names = FALSE, type = 1)
+```
+
+**NEW CODE**
+
+##Step 4: Perform ANOVA tests on treasury data
+
+```{r, tidy = TRUE}
+#find biggest changepoint in data
+max1 = anova_tests(rates$Value)
+
+#create two subsets from max1
+pop1a = rates$Value[(1:max1[2])]
+pop1b = rates$Value[(max1[2]+1):(length(rates$Value))]
+
+#perform anova tests on each subset and grab max test statistics
+max2 = anova_tests(pop1a)
+max3 = anova_tests(pop1b)
+
+#create two subsets from max2
+pop2a = pop1a[1:max2[2]]
+pop2b = pop1a[(max2[2]+1):length(pop1a)]
+
+#create two subsets from max3
+pop3a = pop1b[1:max3[2]]
+pop3b = pop1b[(max3[2]+1):length(pop1b)]
+
+#perform anova tests on each new subset and grab max test statisticss
+max4 = anova_tests(pop2a)
+max5 = anova_tests(pop2b)
+max6 = anova_tests(pop3a)
+max7 = anova_tests(pop3b)
+
+# how to retrieve index from original data
+# for example, grab index within original data for max5
+# which(rates$Value == pop3b[max7[2]])
+
+```
+
+
+**OLD CODE**
+
+## Step 4: Compare test stats to critical values 
+Function that recursively searches for changepoint parameters:
+rate_list: vector of float values
+alpha: significance level for our test is set at the $$\alpha= 0.001~level$$
+
+```{r tidy=TRUE}
+# Function to perform anova tests returning test statistic on the real data
+# rs:vector of float values
+anova_F = function(rs){
+  index_end = length(rs)
+  #vectors to hold test statistics
+  anovatest_stats = c()
+  #traverse through list and perform anova tests
+  for (i in 2:(index_end-2)){
+    #create factors for anova test
+    populations = factor(c(rep(c("a","b"), c(i,index_end-i))))
+    #perform anova test
+    anova_results = unlist(summary(aov(rs~populations)))
+    f_stat = anova_results[7]
+    #get critical val
+    c_val = lambdaQTSd[4] # Reference Lambda critical value at alpha = 0.01
+    #compare test stat to critical val
+    if (f_stat > c_val){ 
+      anovatest_stats = c(anovatest_stats, "Changepoint", anova_results[7], anova_results[9])
+    }
+    #otherwise, no change found
+    else{
+      anovatest_stats = c(anovatest_stats, "No Changepoint", anova_results[7], anova_results[9])
+      }
+  }
+  #return max test statistic
+  return(anovatest_stats)
+}
+
+#### Run the test on live data comparing to our Lambda Distribution critical value ###
+# We also contruct the steps below to kick out the F-value and P-value for each test run
+a_Results = as.data.frame(anova_F(rates$Value))
+anova_results = data.frame(
+  x = a_Results,
+  result = c("Result", "FVal", "PVal")[c(1,2,3)]
+)
+# Unstack into a dataframe to see each respective index, F-Value and P-Value
+anova_results = unstack(anova_results)
+
+par(mfrow=c(2,2))
+plot(rates$Value ~ as.Date(rates$Date), type="l", main = "U.S. Treasury 10 Year - Yield (%)", xlab = "Date" , ylab = "Yield (%)")
+plot(anova_results$FVal, type="l", main = "F-Values Across Cascading Test", xlab = "Index", ylab = "F-Values")
+plot(anova_results$PVal, type = "l", main = "P-Values Across Cascading Test", xlab = "Index", ylab = "P-Values")
+
+###########################
+
+## Subsetting code to come
+
+sub2 = rates[3:length(rates$Value),]
+
+a2_Results_sub2 = as.data.frame(anova_F(sub2$Value))
+anova_results_sub2 = data.frame(
+  x = a2_Results_sub2,
+  result = c("Result", "FVal", "PVal")[c(1,2,3)]
+)
+
+anova_results_sub2 = unstack(anova_results_sub2)
+
+plot(sub2$Value ~ as.Date(sub2$Date), type="l", main = "U.S. Treasury 10 Year - Yield (%)", xlab = "Date" , ylab = "Yield (%)")
+plot(anova_results_sub2$FVal, type="l", main = "F-Values Across Cascading Test", xlab = "Index", ylab = "F-Values")
+plot(anova_results_sub2$PVal, type = "l", main = "P-Values Across Cascading Test", xlab = "Index", ylab = "P-Values")
+
+## Data for plot
+aov_chart = rates[-3,]
+aov_chart = rates[1:(n-3),]
+aov_chart$Date = as.Date(aov_chart$Date)
+aov_chart$Value = as.numeric(aov_chart$Value)
+aov_chart$FVal = as.numeric(anova_results$FVal)
+aov_chart$PVal = as.numeric(anova_results$PVal)
+aov_chart$FVal = round(aov_chart$FVal, digits = 3)
+aov_chart$PVal = round(aov_chart$PVal, digits = 6)
+
+
+library(ggplot2)
+library(reshape2)
+aov_chart_prep = melt(aov_chart, id = "Date", measure = c("Value", "FVal", "PVal"))
+ggplot(aov_chart_prep, aes(Date, value, colour = variable)) + geom_line()
+
+
+chart = ggplot() + 
+  geom_line(data = aov_chart, aes(x = Date, y = Value), color = "red") + scale_y_continuous
+  geom_line(data = aov_chart, aes(x = Date, y = FVal), color = "blue") + scale_y_continuous(sec.axis = sec_axis(~./1000)) +
+  geom_line(data = aov_chart, aes(x = Date, y = PVal), color = "green") +
+  xlab('Date')
+chart
+
+### Running new data in to come
+
+```

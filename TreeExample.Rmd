@@ -1,0 +1,89 @@
+---
+title: "Tree"
+author: "Erik Szylard Daenitz"
+date: "4/23/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+
+# routines to create trees and insert items into them are included
+# below; a deletion routine is left to the reader as an exercise
+
+# storage is in a matrix, say m, one row per node of the tree; a link i
+# in the tree means the vector m[i,] = (u,v,w); u and v are the left and
+# right links, and w is the stored value; null links have the value NA;
+# the matrix is referred to as the list (m,nxt,inc), where m is the
+# matrix, nxt is the next empty row to be used, and inc is the number of
+# rows of expansion to be allocated when the matrix becomes full
+
+# initializes a storage matrix, with initial stored value firstval
+newtree <- function(firstval,inc) {
+   m <- matrix(rep(NA,inc*3),nrow=inc,ncol=3)
+   m[1,3] <- firstval
+   return(list(mat=m,nxt=2,inc=inc))
+}
+
+# inserts newval into nonempty tree whose head is index hdidx in the
+# storage space treeloc; note that return value must be reassigned to
+# tree; inc is as in newtree() above
+ins <- function(hdidx,tree,newval,inc) {
+   tr <- tree
+   # check for room to add a new element
+   tr$nxt <- tr$nxt + 1
+   if (tr$nxt > nrow(tr$mat))
+      tr$mat <- rbind(tr$mat,matrix(rep(NA,inc*3),nrow=inc,ncol=3))
+   newidx <- tr$nxt  # where we'll put the new tree node
+   tr$mat[newidx,3] <- newval
+   idx <- hdidx  # marks our current place in the tree
+   node <- tr$mat[idx,]
+   nodeval <- node[3] 
+   while (TRUE) {
+      # which direction to descend, left or right?
+      if (newval <= nodeval) dir <- 1 else dir <- 2
+      # descend
+      # null link?
+      if (is.na(node[dir])) {
+         tr$mat[idx,dir] <- newidx
+         break
+      } else {
+         idx <- node[dir]
+         node <- tr$mat[idx,]
+         nodeval <- node[3] 
+      }
+   }
+   return(tr)
+}
+
+# print sorted tree via inorder traversal
+printtree <- function(hdidx,tree) {
+   left <- tree$mat[hdidx,1]
+   if (!is.na(left)) printtree(left,tree)
+   print(tree$mat[hdidx,3])
+   right <- tree$mat[hdidx,2]
+   if (!is.na(right)) printtree(right,tree)
+}
+
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
