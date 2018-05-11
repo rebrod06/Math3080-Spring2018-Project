@@ -1,6 +1,4 @@
 # Math-3080-Project-2018-
-Math 3080 Project
-
 Change Point Detection : It's the economy, stupid
 
 A time series is a sequence of data points indexed by time: X1,X2,...,XT . Suppose the
