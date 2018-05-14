@@ -112,7 +112,7 @@ max_stats_ttest_mc = parApply(cl, rs, 2, t_tests)
 ```
 
 
-##Step 3: Create Lambda distribution CDF, PDF and critical values from simulated Lamda Distribution
+## Step 3: Create Lambda distribution CDF, PDF and critical values from simulated Lamda Distribution
 Now that we have achieved the simulation of the Lamda Distribution we must assemble a CDF and take quantiles of the PDF at different alpha critical value levels.
 
 Our chosen alpha levels:
@@ -142,7 +142,7 @@ lambdaQTSd_ttest = quantile(max_stats_ttest_mc[1,], probs = c(0.90, 0.95, 0.975,
 
 ```
 
-##Step 4: Perform ANOVA and t-tests on treasury data
+## Step 4: Perform ANOVA and t-tests on treasury data
 
 ```{r, tidy = TRUE}
 #find biggest changepoint in data using ANOVA and t-tests
@@ -201,7 +201,7 @@ max_stats_ttest = c(max1t[1], max2t[1], max3t[1], max4t[1], max5t[1], max6t[1], 
 
 ```
 
-##Step 5: Compare test statistics to lambda critical values
+## Step 5: Compare test statistics to lambda critical values
 
 ```{r, tidy = TRUE}
 #compare each stat to lambda critical values
