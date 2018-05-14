@@ -1,0 +1,252 @@
+---
+title: "Math 3080 Final Project"
+author: "Rebecca Rodriguez, Erik Daenitz, Nick Hickman, Seoyeon Yang"
+date: "April 27, 2018"
+output: html_document
+---
+
+
+## Step 1: Data prep
+Stream U.S. 10 year Treasury data into data frame. We use monthly observations for yields. We then subset that data to take the most recent ~20 years of daily observations.
+
+```{r, tidy = TRUE}
+
+#import monthly data
+treasuryRates = read.csv("10YTreasuryYield.csv") #monthly rates
+
+#grab past 20 years
+rates = treasuryRates[1:245,]
+
+#remove factor from date column
+rates$Date = as.vector(rates$Date)
+
+#convert strings to dates
+rates$Date = as.Date(rates$Date, "%m/%d/%Y")
+
+#visualize data
+plot(rates$Date, rates$Value, type="l")
+```
+
+
+## Step 2: Use Monte Carlo Method to simulate rates
+
+1) Generate X random standard normal variables (X = number of observations over 20 yr period)
+2) Repeat 1) 1000 times to obtain matrix of values
+3) Perform cascading One Way ANOVA test within each matrix column
+  a) Perform X-4 tests and obtain X-4 test statistics
+  b) Grab the max test statistic for each column to obtain 1000 max values to form our Lambda Distribution with
+
+
+```{r, tidy = TRUE}
+set.seed(1000) # Set seed to ensure replicable results
+
+# Parameters for sampling from standard normal distribution
+n = length(rates$Value) # The sample size
+m = 1000 # The number of simulations to replicate, also the length of values in our Lambda Distribution
+mu = 0 # The true expected mean value of our normal distribution
+s = 1 # The true variance of our normal distribution
+
+# Generate m random samples of size n
+rs = matrix(rnorm(n*m,mu,s), nrow=n, ncol=m)
+
+# Function to perform cascading ANOVA tests through a vector and return max f statistic
+# rs: vector of float values
+anova_tests <- function(rs){
+  index_end = length(rs)
+  #vectors to hold test statistics
+  anovatest_stats = c()
+  #traverse through list and perform anova tests
+  for (i in 2:(index_end-2)){
+    #create factors for anova test
+    populations = factor(c(rep(c("a","b"), c(i,index_end-i))))
+    #perform anova test
+    anova_results = unlist(summary(aov(rs~populations)))
+    #put test statistic in list
+    anovatest_stats = c(anovatest_stats, anova_results[7])
+  }
+  #return vector of max test statistic and corresponding index
+  max_stat = max(anovatest_stats)
+  return(cbind(max_stat, (match(max_stat, anovatest_stats)+1))) #index of last element in first population
+}
+
+## Function to perform t tests
+# values: vector of float values
+t_tests <- function(values){
+  index_end = length(values)
+  #vectors to hold test statistics
+  ttest_stats = c()
+  #traverse through list and perform t tests
+  for (i in 2:(index_end-2)){
+    #perform t test
+    ttest_results = t.test(c(values[1:i]), c(values[i+1:index_end]), alternative="two.sided", var.equal=TRUE)
+    #add test statistic to list
+    ttest_stats = c(ttest_stats, ttest_results$statistic)
+  }
+  
+  #return vector of (absolute value of) max test statistic and corresponding index
+  max_stat = max(abs(ttest_stats))
+  if(max_stat > max(ttest_stats)){ #if abs val of max is bigger than max
+    max_stat_index = (match(-max_stat, ttest_stats)+1)  #then return index of neg max
+  }
+  else{
+    max_stat_index = (match(max_stat, ttest_stats)+1)
+  }
+
+  return(cbind(max_stat, max_stat_index)) #index of last element in first population
+}
+
+
+## Now run the functions over every vector (column) in the matrix ##
+
+# Load the library "snow"" to parallelize the computation using all available cores of the local machine
+library(snow)
+# Open up sockets to the 4 local processor cores (but only if you have 4 cores...mwahaha)
+## Note: only enter "localhost" = to the number of cores on your processor
+cl = makeSOCKcluster(c("localhost","localhost","localhost","localhost"))
+
+# Retrieve max test statistics by applying the function to each matrix vector
+## Note: expect to wait about 45 mins on a 2.7ghz quad core processor ##
+max_stats_anova_mc = parApply(cl, rs, 2, anova_tests)
+max_stats_ttest_mc = parApply(cl, rs, 2, t_tests)
+
+```
+
+
+##Step 3: Create Lambda distribution CDF, PDF and critical values from simulated Lamda Distribution
+Now that we have achieved the simulation of the Lamda Distribution we must assemble a CDF and take quantiles of the PDF at different alpha critical value levels.
+
+Our chosen alpha levels:
+$$\alpha=0.10, 0.05, 0.025, 0.01, 0.001$$
+
+```{r, tidy = TRUE}
+# CDF and plotted PDF using max values Lamda Distribution from ANOVA and t-tests
+lambdaCDF_anova = ecdf(max_stats_anova_mc[1,])
+plot(density(max_stats_anova_mc[1,]), main = "Lambda PDF", xlab = "Critical Value" , ylab = "Density of Observations")
+plot(lambdaCDF_anova, main = "Lambda CDF", xlab = "Critical Value" , ylab = "Accumulated Area")
+
+#t-test is same same
+lambdaCDF_ttest = ecdf(max_stats_ttest_mc[1,])
+plot(density(max_stats_ttest_mc[1,]), main = "Lambda PDF", xlab = "Critical Value" , ylab = "Density of Observations")
+plot(lambdaCDF_ttest, main = "Lambda CDF", xlab = "Critical Value" , ylab = "Accumulated Area")
+
+
+# Spare P-value function to create P-values from our underlying Lambda Distribution at any specified critical value
+## Note: This function is not used in subsequent code, it is just created to provide quick intuition on associated p-values with any critical value if the user wishes to get a better sense of the distribution areas.
+lambdaPVal = function (x){
+  return(1-lambdaCDF(x))
+} 
+
+# Return appropriate critical values of our Lambda Distribution to later test our F-Statistics on live data against 
+lambdaQTSd_anova = quantile(max_stats_anova_mc[1,], probs = c(0.90, 0.95, 0.975, 0.99, 0.999), na.rm = FALSE, names = FALSE, type = 1)
+lambdaQTSd_ttest = quantile(max_stats_ttest_mc[1,], probs = c(0.90, 0.95, 0.975, 0.99, 0.999), na.rm = FALSE, names = FALSE, type = 1)
+
+```
+
+##Step 4: Perform ANOVA and t-tests on treasury data
+
+```{r, tidy = TRUE}
+#find biggest changepoint in data using ANOVA and t-tests
+max1 = anova_tests(rates$Value)
+max1t = t_tests(rates$Value)
+
+#create two subsets from max1, max1t
+pop1a = rates$Value[(1:max1[1,2])]
+pop1b = rates$Value[(max1[1,2]+1):(length(rates$Value))]
+
+pop1at = rates$Value[(1:max1t[1,2])]
+pop1bt = rates$Value[(max1t[1,2]+1):(length(rates$Value))]
+
+###
+
+#perform tests on each new subset
+max2 = anova_tests(pop1a)
+max3 = anova_tests(pop1b)
+
+max2t = t_tests(pop1at)
+max3t = t_tests(pop1bt)
+
+#create four subsets each from max2, max2t, max3, max3t
+pop2a = pop1a[1:max2[1,2]]
+pop2b = pop1a[(max2[1,2]+1):length(pop1a)]
+
+pop2at = pop1at[1:max2t[1,2]]
+pop2bt = pop1at[(max2t[1,2]+1):length(pop1at)]
+
+pop3a = pop1b[1:max3[1,2]]
+pop3b = pop1b[(max3[1,2]+1):length(pop1b)]
+
+pop3at = pop1bt[1:max3t[1,2]]
+pop3bt = pop1bt[(max3t[1,2]+1):length(pop1bt)]
+
+###
+
+#perform tests on each new subset
+max4 = anova_tests(pop2a)
+max5 = anova_tests(pop2b)
+
+max4t = t_tests(pop2at)
+max5t = t_tests(pop2bt)
+
+max6 = anova_tests(pop3a)
+max7 = anova_tests(pop3bt)
+
+max6t = t_tests(pop3at)
+max7t = t_tests(pop3bt)
+
+###
+
+#put maxes in vector
+max_stats_anova = c(max1[1], max2[1], max3[1], max4[1], max5[1], max6[1], max7[1])
+max_stats_ttest = c(max1t[1], max2t[1], max3t[1], max4t[1], max5t[1], max6t[1], max7t[1])
+
+```
+
+##Step 5: Compare test statistics to lambda critical values
+
+```{r, tidy = TRUE}
+#compare each stat to lambda critical values
+## function that compares max stat to lambda critical value at alpha=.05
+## returns true if s is larger than critical value, false otherwise
+compare_max_anova = function(max_stat){
+  return(max_stat > lambdaQTSd_anova[4])
+}
+compare_max_ttest = function(max_stat){
+  return(max_stat > lambdaQTSd_ttest[4])
+}
+
+compare_anova = unlist(lapply(max_stats_anova, compare_max_anova))
+compare_ttest = unlist(lapply(max_stats_ttest, compare_max_ttest))
+
+
+## function that returns the interest rate for corresponding max stat
+find_rate = function(maximum, subpop){
+  return (subpop[maximum[1,2]])
+}
+
+#apply function to all maxes and subsets
+r1 = rates$Value[max1[1,2]]
+r2 = find_rate(max2, pop1a)
+r3 = find_rate(max3, pop1b)
+r4 = find_rate(max4, pop2a)
+r5 = find_rate(max5, pop2b)
+r6 = find_rate(max6, pop3a)
+r7 = find_rate(max7, pop3b)
+rlist = c(r1, r2, r3, r4, r5, r6, r7)
+
+##changepoints!!
+changepts_anova = cbind(compare_anova, max_stats_anova, rlist)
+changepts_ttest = cbind(compare_ttest, max_stats_ttest, rlist)
+
+```
+
+## Step 6: Visulaize the change points
+
+```{r, tidy = TRUE}
+
+#plot rates
+plot(rates$Date, rates$Value, type="l")
+points(changepts_anova[rlist,], col="red", pch=25)
+
+
+```
+
